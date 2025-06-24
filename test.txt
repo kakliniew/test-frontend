@@ -1,0 +1,58 @@
+mapfile -t num_group < <(
+  find "$src_dir" -type f -regex '.*/[0-9]+\.feature' -exec stat -c '%s %n' {} + | sort -nr
+)
+
+index=1
+for line in "${num_group[@]}"; do
+  size=${line%% *}
+  file=${line#* }
+
+  target="$dst_dir/${index}.feature"
+
+  if [[ -f "$target" ]]; then
+    existing_size=$(stat -c '%s' "$target")
+    if [[ "$existing_size" -eq "$size" ]]; then
+      echo "Skipping identical: $target"
+      continue
+    fi
+  fi
+
+  echo "Copying $file -> $target"
+  cp "$file" "$target"
+  ((index++))
+done
+
+mapfile -t named_group < <(
+  find "$src_dir" -type f -name '*_*.feature' -exec stat -c '%s %n' {} + | sort -nr
+)
+
+declare -A counters
+
+for line in "${named_group[@]}"; do
+  size=${line%% *}
+  file=${line#* }
+
+  base=$(basename "$file")
+  name=$(echo "$base" | sed -E 's/^[0-9]+_//')
+
+  count=${counters[$name]:-1}
+  if [[ $count -eq 1 ]]; then
+    target="$dst_dir/$name"
+  else
+    ext="${name##*.}"
+    base_name="${name%.*}"
+    target="$dst_dir/${base_name}_$count.$ext"
+  fi
+
+  if [[ -f "$target" ]]; then
+    existing_size=$(stat -c '%s' "$target")
+    if [[ "$existing_size" -eq "$size" ]]; then
+      echo "Skipping identical: $target"
+      continue
+    fi
+  fi
+
+  echo "Copying $file -> $target"
+  cp "$file" "$target"
+  counters["$name"]=$((count + 1))
+done
