@@ -1,58 +1,61 @@
-mapfile -t num_group < <(
-  find "$src_dir" -type f -regex '.*/[0-9]+\.feature' -exec stat -c '%s %n' {} + | sort -nr
-)
 
-index=1
-for line in "${num_group[@]}"; do
-  size=${line%% *}
-  file=${line#* }
+src_dir="new_features"
+dst_dir="features"
+mkdir -p "$dst_dir"
 
-  target="$dst_dir/${index}.feature"
+find "$src_dir" -type f -regex '.*/[0-9]+\.feature' -exec stat -c '%s %n' {} + | sort -nr |
+awk -v dst="$dst_dir" '
+  BEGIN { idx = 1 }
+  {
+    size = $1
+    $1 = ""; sub(/^ /, "")
+    file = $0
+    target = dst "/" idx ".feature"
 
-  if [[ -f "$target" ]]; then
-    existing_size=$(stat -c '%s' "$target")
-    if [[ "$existing_size" -eq "$size" ]]; then
-      echo "Skipping identical: $target"
-      continue
-    fi
-  fi
+    if (system("[ -f \"" target "\" ]") == 0) {
+      cmd = "stat -c %s \"" target "\""
+      cmd | getline existing_size
+      close(cmd)
+      if (existing_size == size) {
+        print "Skipping identical: " target
+        next
+      }
+    }
+    print "Copying", file, "->", target
+    system("cp \"" file "\" \"" target "\"")
+    idx++
+  }
+'
 
-  echo "Copying $file -> $target"
-  cp "$file" "$target"
-  ((index++))
-done
+find "$src_dir" -type f -name '*_*.feature' -exec stat -c '%s %n' {} + | sort -nr |
+awk -v dst="$dst_dir" '
+  function get_target(name, count) {
+    if (count == 1) return dst "/" name
+    split(name, parts, /\./)
+    return dst "/" parts[1] "_" count "." parts[2]
+  }
 
-mapfile -t named_group < <(
-  find "$src_dir" -type f -name '*_*.feature' -exec stat -c '%s %n' {} + | sort -nr
-)
+  {
+    size = $1
+    $1 = ""; sub(/^ /, "")
+    file = $0
+    name = file
+    sub(/^.*\//, "", name)        # basename
+    sub(/^[0-9]+_/, "", name)     # remove numeric prefix
 
-declare -A counters
+    count[name]++
+    target = get_target(name, count[name])
 
-for line in "${named_group[@]}"; do
-  size=${line%% *}
-  file=${line#* }
-
-  base=$(basename "$file")
-  name=$(echo "$base" | sed -E 's/^[0-9]+_//')
-
-  count=${counters[$name]:-1}
-  if [[ $count -eq 1 ]]; then
-    target="$dst_dir/$name"
-  else
-    ext="${name##*.}"
-    base_name="${name%.*}"
-    target="$dst_dir/${base_name}_$count.$ext"
-  fi
-
-  if [[ -f "$target" ]]; then
-    existing_size=$(stat -c '%s' "$target")
-    if [[ "$existing_size" -eq "$size" ]]; then
-      echo "Skipping identical: $target"
-      continue
-    fi
-  fi
-
-  echo "Copying $file -> $target"
-  cp "$file" "$target"
-  counters["$name"]=$((count + 1))
-done
+    if (system("[ -f \"" target "\" ]") == 0) {
+      cmd = "stat -c %s \"" target "\""
+      cmd | getline existing_size
+      close(cmd)
+      if (existing_size == size) {
+        print "Skipping identical: " target
+        next
+      }
+    }
+    print "Copying", file, "->", target
+    system("cp \"" file "\" \"" target "\"")
+  }
+'
